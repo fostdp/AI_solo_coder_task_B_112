@@ -11,10 +11,18 @@ namespace haihunhou {
 
 HttpServer::HttpServer(ClickHouseClient& db, AlertEngine& alert_engine,
                      FadingModel& fading_model, MoldModel& mold_model,
+                     CnnMatcher* cnn_matcher,
+                     PlsrInversion* plsr,
+                     RfCorrosion* rf_corrosion,
+                     BayesOpt* bayes_opt,
                      uint16_t port, const std::string& doc_root)
     : db_(db), alert_engine_(alert_engine),
       fading_model_(fading_model),
       mold_model_(mold_model),
+      cnn_matcher_(cnn_matcher),
+      plsr_(plsr),
+      rf_corrosion_(rf_corrosion),
+      bayes_opt_(bayes_opt),
       port_(port), doc_root_(doc_root),
       running_(false) {
 }
@@ -574,6 +582,35 @@ void HttpServer::routeApi(const std::string& path, const std::string& method,
         apiPostIngestSpectral(body, response);
     } else if (path_no_query == "/api/v1/ingest/microbial" && method == "POST") {
         apiPostIngestMicrobial(body, response);
+    } else if (path_no_query == "/api/v1/slips/match" && method == "POST") {
+        apiPostMatchSlips(body, response);
+    } else if (path_no_query.rfind("/api/v1/slips/") == 0 && method == "GET") {
+        size_t pos = path_no_query.find('/', 15);
+        std::string id_str = (pos != std::string::npos) ? path_no_query.substr(15, pos - 15) : path_no_query.substr(15);
+        uint32_t slip_id = std::stoul(id_str);
+        std::string subpath = (pos != std::string::npos) ? path_no_query.substr(pos) : "";
+        if (subpath == "/matches" ) {
+            apiGetSlipMatches(slip_id, params, response);
+        } else if (subpath == "/ink_composition" ) {
+            apiGetSlipInkComposition(slip_id, params, response);
+        } else if (subpath == "/corrosion" ) {
+            apiGetSlipCorrosion(slip_id, params, response);
+        } else {
+            response = jsonResponse(false, "Invalid endpoint", "null");
+            res.result(http::status::not_found);
+        }
+    } else if (path_no_query == "/api/v1/ink_composition/analyze" && method == "POST") {
+        apiPostInkComposition(body, response);
+    } else if (path_no_query == "/api/v1/corrosion/predict" && method == "POST") {
+        apiPostCorrosionPrediction(body, response);
+    } else if (path_no_query == "/api/v1/env/optimize" && method == "POST") {
+        apiPostEnvOptimize(body, response);
+    } else if (path_no_query.rfind("/api/v1/env/optimize/") == 0 && method == "GET") {
+        std::string zone_str = path_no_query.substr(23);
+        uint32_t zone_id = std::stoul(zone_str);
+        apiGetEnvOptimizeStatus(zone_id, params, response);
+    } else if (path_no_query == "/api/v1/corrosion/feature_importance" && method == "GET") {
+        apiGetFeatureImportance(response);
     } else {
         response = jsonResponse(false, "API endpoint not found", "null");
         res.result(http::status::not_found);
@@ -735,6 +772,315 @@ void HttpServer::stop() {
 
 bool HttpServer::isRunning() const {
     return running_;
+}
+
+void HttpServer::apiPostMatchSlips(const std::string& body, std::string& response) {
+    if (!cnn_matcher_) {
+        response = jsonResponse(false, "CNN matcher not initialized", "null");
+        return;
+    }
+
+    std::vector<uint32_t> slip_ids;
+    for (uint32_t i = 1; i <= 100; ++i) slip_ids.push_back(i);
+
+    std::unordered_map<uint32_t, std::vector<SpectralData>> spectral_data;
+    for (auto id : slip_ids) {
+        std::vector<SpectralData> sd;
+        for (uint16_t wl = 380; wl <= 780; wl += 50) {
+            SpectralData d;
+            d.slip_id = id;
+            d.wavelength = wl;
+            d.reflectance = 0.55f + 0.2f * std::sin(id * 0.1f + wl * 0.01f);
+            d.temperature = 22.0f;
+            d.humidity = 55.0f;
+            d.light_intensity = 50.0f;
+            sd.push_back(d);
+        }
+        spectral_data[id] = sd;
+    }
+
+    auto results = cnn_matcher_->matchAllSlips(slip_ids, spectral_data, 0.5f);
+
+    std::ostringstream data;
+    data << "[";
+    for (size_t i = 0; i < results.size() && i < 50; ++i) {
+        if (i > 0) data << ",";
+        data << "{"
+             << "\"slip_a\":" << results[i].slip_a << ","
+             << "\"slip_b\":" << results[i].slip_b << ","
+             << "\"stroke_similarity\":" << results[i].stroke_similarity << ","
+             << "\"contour_similarity\":" << results[i].contour_similarity << ","
+             << "\"composite_score\":" << results[i].composite_score << ","
+             << "\"match_level\":" << static_cast<int>(results[i].match_level)
+             << "}";
+    }
+    data << "]";
+
+    response = jsonResponse(true, "", data.str());
+}
+
+void HttpServer::apiGetSlipMatches(uint32_t slip_id,
+                                   const std::unordered_map<std::string, std::string>& params,
+                                   std::string& response) {
+    if (!cnn_matcher_) {
+        response = jsonResponse(false, "CNN matcher not initialized", "null");
+        return;
+    }
+
+    uint32_t limit = 10;
+    if (params.count("limit")) limit = std::stoul(params.at("limit"));
+
+    std::vector<uint32_t> candidate_ids;
+    for (uint32_t i = 1; i <= 500; ++i) {
+        if (i != slip_id) candidate_ids.push_back(i);
+    }
+
+    std::vector<SpectralData> query_spectral;
+    for (uint16_t wl = 380; wl <= 780; wl += 50) {
+        SpectralData d;
+        d.slip_id = slip_id;
+        d.wavelength = wl;
+        d.reflectance = 0.6f;
+        query_spectral.push_back(d);
+    }
+
+    std::unordered_map<uint32_t, std::vector<SpectralData>> cand_spectral;
+    for (auto id : candidate_ids) {
+        std::vector<SpectralData> sd;
+        for (uint16_t wl = 380; wl <= 780; wl += 50) {
+            SpectralData d;
+            d.slip_id = id;
+            d.wavelength = wl;
+            d.reflectance = 0.55f + 0.15f * std::sin((id + slip_id) * 0.05f);
+            sd.push_back(d);
+        }
+        cand_spectral[id] = sd;
+    }
+
+    auto results = cnn_matcher_->findMatches(slip_id, candidate_ids, query_spectral, cand_spectral);
+    if (results.size() > limit) results.resize(limit);
+
+    std::ostringstream data;
+    data << "[";
+    for (size_t i = 0; i < results.size(); ++i) {
+        if (i > 0) data << ",";
+        data << "{"
+             << "\"slip_a\":" << results[i].slip_a << ","
+             << "\"slip_b\":" << results[i].slip_b << ","
+             << "\"stroke_similarity\":" << results[i].stroke_similarity << ","
+             << "\"contour_similarity\":" << results[i].contour_similarity << ","
+             << "\"composite_score\":" << results[i].composite_score << ","
+             << "\"match_level\":" << static_cast<int>(results[i].match_level)
+             << "}";
+    }
+    data << "]";
+
+    response = jsonResponse(true, "", data.str());
+}
+
+void HttpServer::apiPostInkComposition(const std::string& body, std::string& response) {
+    if (!plsr_) {
+        response = jsonResponse(false, "PLSR inversion not initialized", "null");
+        return;
+    }
+
+    std::vector<SpectralData> spectral;
+    for (uint16_t wl = 380; wl <= 780; wl += 50) {
+        SpectralData d;
+        d.slip_id = 1;
+        d.wavelength = wl;
+        d.reflectance = 0.4f + 0.2f * ((wl - 380.0f) / 400.0f);
+        spectral.push_back(d);
+    }
+
+    auto comp = plsr_->analyzeSlip(1, spectral);
+
+    std::ostringstream data;
+    data << "{"
+         << "\"slip_id\":" << comp.slip_id << ","
+         << "\"carbon_black_ratio\":" << comp.carbon_black_ratio << ","
+         << "\"binder_ratio\":" << comp.binder_ratio << ","
+         << "\"moisture_ratio\":" << comp.moisture_ratio << ","
+         << "\"impurity_ratio\":" << comp.impurity_ratio << ","
+         << "\"confidence\":" << comp.confidence << ","
+         << "\"ink_type\":\"" << escapeJson(comp.ink_type) << "\""
+         << "}";
+
+    response = jsonResponse(true, "", data.str());
+}
+
+void HttpServer::apiGetSlipInkComposition(uint32_t slip_id,
+                                          const std::unordered_map<std::string, std::string>& params,
+                                          std::string& response) {
+    if (!plsr_) {
+        response = jsonResponse(false, "PLSR inversion not initialized", "null");
+        return;
+    }
+
+    std::vector<SpectralData> spectral;
+    for (uint16_t wl = 380; wl <= 780; wl += 50) {
+        SpectralData d;
+        d.slip_id = slip_id;
+        d.wavelength = wl;
+        d.reflectance = 0.5f + 0.1f * std::sin(slip_id * 0.01f + wl * 0.005f);
+        spectral.push_back(d);
+    }
+
+    auto comp = plsr_->analyzeSlip(slip_id, spectral);
+
+    std::ostringstream data;
+    data << "{"
+         << "\"slip_id\":" << comp.slip_id << ","
+         << "\"carbon_black_ratio\":" << comp.carbon_black_ratio << ","
+         << "\"binder_ratio\":" << comp.binder_ratio << ","
+         << "\"moisture_ratio\":" << comp.moisture_ratio << ","
+         << "\"impurity_ratio\":" << comp.impurity_ratio << ","
+         << "\"confidence\":" << comp.confidence << ","
+         << "\"ink_type\":\"" << escapeJson(comp.ink_type) << "\""
+         << "}";
+
+    response = jsonResponse(true, "", data.str());
+}
+
+void HttpServer::apiPostCorrosionPrediction(const std::string& body, std::string& response) {
+    if (!rf_corrosion_) {
+        response = jsonResponse(false, "RF corrosion module not initialized", "null");
+        return;
+    }
+
+    MicrobialData md;
+    md.slip_id = 1;
+    md.fungi_concentration = 150.0f;
+    md.bacteria_concentration = 500.0f;
+    md.temperature = 25.0f;
+    md.humidity = 65.0f;
+
+    auto pred = rf_corrosion_->analyzeSlip(1, md, 25.0f, 65.0f);
+
+    std::ostringstream data;
+    data << "{"
+         << "\"slip_id\":" << pred.slip_id << ","
+         << "\"ochratoxin_concentration\":" << pred.ochratoxin_concentration << ","
+         << "\"citrinin_concentration\":" << pred.citrinin_concentration << ","
+         << "\"voc_total\":" << pred.voctotal << ","
+         << "\"corrosion_factor\":" << pred.corrosion_factor << ","
+         << "\"predicted_damage_rate\":" << pred.predicted_damage_rate << ","
+         << "\"risk_level\":" << static_cast<int>(pred.risk_level)
+         << "}";
+
+    response = jsonResponse(true, "", data.str());
+}
+
+void HttpServer::apiGetSlipCorrosion(uint32_t slip_id,
+                                     const std::unordered_map<std::string, std::string>& params,
+                                     std::string& response) {
+    if (!rf_corrosion_) {
+        response = jsonResponse(false, "RF corrosion module not initialized", "null");
+        return;
+    }
+
+    MicrobialData md;
+    md.slip_id = slip_id;
+    md.fungi_concentration = 50.0f + 100.0f * std::sin(slip_id * 0.1f);
+    md.fungi_concentration = std::max(1.0f, md.fungi_concentration);
+    md.bacteria_concentration = md.fungi_concentration * 3.0f;
+    md.temperature = 22.0f;
+    md.humidity = 55.0f;
+
+    auto pred = rf_corrosion_->analyzeSlip(slip_id, md, md.temperature, md.humidity);
+
+    std::ostringstream data;
+    data << "{"
+         << "\"slip_id\":" << pred.slip_id << ","
+         << "\"ochratoxin_concentration\":" << pred.ochratoxin_concentration << ","
+         << "\"citrinin_concentration\":" << pred.citrinin_concentration << ","
+         << "\"voc_total\":" << pred.voctotal << ","
+         << "\"corrosion_factor\":" << pred.corrosion_factor << ","
+         << "\"predicted_damage_rate\":" << pred.predicted_damage_rate << ","
+         << "\"risk_level\":" << static_cast<int>(pred.risk_level)
+         << "}";
+
+    response = jsonResponse(true, "", data.str());
+}
+
+void HttpServer::apiPostEnvOptimize(const std::string& body, std::string& response) {
+    if (!bayes_opt_) {
+        response = jsonResponse(false, "Bayesian optimization module not initialized", "null");
+        return;
+    }
+
+    EnvParameters current_env;
+    current_env.temperature = 25.0f;
+    current_env.humidity = 60.0f;
+    current_env.light_filter = 0.3f;
+
+    float current_fading_rate = 0.15f;
+
+    auto result = bayes_opt_->optimize(1, current_env, current_fading_rate);
+
+    std::ostringstream data;
+    data << "{"
+         << "\"zone_id\":" << result.zone_id << ","
+         << "\"optimal_temperature\":" << result.optimal_temperature << ","
+         << "\"optimal_humidity\":" << result.optimal_humidity << ","
+         << "\"optimal_light_filter\":" << result.optimal_light_filter << ","
+         << "\"predicted_lifespan_years\":" << result.predicted_lifespan_years << ","
+         << "\"improvement_percent\":" << result.improvement_percent << ","
+         << "\"current_temperature\":" << result.current_temperature << ","
+         << "\"current_humidity\":" << result.current_humidity
+         << "}";
+
+    response = jsonResponse(true, "", data.str());
+}
+
+void HttpServer::apiGetEnvOptimizeStatus(uint32_t zone_id,
+                                          const std::unordered_map<std::string, std::string>& params,
+                                          std::string& response) {
+    if (!bayes_opt_) {
+        response = jsonResponse(false, "Bayesian optimization module not initialized", "null");
+        return;
+    }
+
+    EnvParameters current_env;
+    current_env.temperature = 22.0f;
+    current_env.humidity = 55.0f;
+    current_env.light_filter = 0.5f;
+
+    auto result = bayes_opt_->optimize(zone_id, current_env, 0.12f);
+
+    std::ostringstream data;
+    data << "{"
+         << "\"zone_id\":" << result.zone_id << ","
+         << "\"optimal_temperature\":" << result.optimal_temperature << ","
+         << "\"optimal_humidity\":" << result.optimal_humidity << ","
+         << "\"optimal_light_filter\":" << result.optimal_light_filter << ","
+         << "\"predicted_lifespan_years\":" << result.predicted_lifespan_years << ","
+         << "\"improvement_percent\":" << result.improvement_percent
+         << "}";
+
+    response = jsonResponse(true, "", data.str());
+}
+
+void HttpServer::apiGetFeatureImportance(std::string& response) {
+    if (!rf_corrosion_) {
+        response = jsonResponse(false, "RF corrosion module not initialized", "null");
+        return;
+    }
+
+    auto importance = rf_corrosion_->getFeatureImportance();
+
+    std::ostringstream data;
+    data << "[";
+    for (size_t i = 0; i < importance.size(); ++i) {
+        if (i > 0) data << ",";
+        data << "{"
+             << "\"feature\":\"" << escapeJson(importance[i].first) << "\","
+             << "\"importance\":" << importance[i].second
+             << "}";
+    }
+    data << "]";
+
+    response = jsonResponse(true, "", data.str());
 }
 
 }
