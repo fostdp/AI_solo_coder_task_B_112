@@ -4,6 +4,7 @@
 #include <numeric>
 #include <random>
 #include <limits>
+#include <chrono>
 
 namespace haihunhou {
 
@@ -47,7 +48,22 @@ void BayesOpt::setObjectiveFunction(ObjectiveFunction fn) {
 EnvOptimizationResult BayesOpt::optimize(
     uint32_t zone_id,
     const EnvParameters& current_env,
-    float current_fading_rate) {
+    float current_fading_rate,
+    OptimizationDiagnostics* diag,
+    uint32_t timeout_ms) {
+
+    auto t_start = std::chrono::steady_clock::now();
+    bool timed_out = false;
+    bool used_tpe = false;
+
+    if (diag) {
+        diag->status = BOPT_OK;
+        diag->iterations_performed = 0;
+        diag->time_elapsed_ms = 0;
+        diag->used_tpe_fallback = false;
+        diag->convergence_gap = 0.0f;
+        diag->message.clear();
+    }
 
     std::vector<ObservationPoint> observations;
 
@@ -60,7 +76,8 @@ EnvOptimizationResult BayesOpt::optimize(
     std::uniform_real_distribution<float> hum_dist(config_.humidity_min, config_.humidity_max);
     std::uniform_real_distribution<float> filter_dist(config_.light_filter_min, config_.light_filter_max);
 
-    for (uint32_t i = 0; i < 5; ++i) {
+    uint32_t n_init = 3;
+    for (uint32_t i = 0; i < n_init; ++i) {
         EnvParameters p;
         p.temperature = temp_dist(rng_);
         p.humidity = hum_dist(rng_);
@@ -71,12 +88,42 @@ EnvOptimizationResult BayesOpt::optimize(
         observations.push_back(pt);
     }
 
-    for (uint32_t iter = 0; iter < config_.max_iterations; ++iter) {
-        auto next = suggestNextPoint(observations);
+    uint32_t iters_done = 0;
+    bool gp_error = false;
+    uint32_t max_it = config_.max_iterations;
+
+    for (uint32_t iter = 0; iter < max_it; ++iter) {
+        if (timeout_ms > 0) {
+            auto t_now = std::chrono::steady_clock::now();
+            auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_now - t_start).count();
+            if ((uint32_t)elapsed_ms >= timeout_ms) {
+                timed_out = true;
+                break;
+            }
+        }
+
+        AcquisitionResult next;
+        try {
+            next = gp_error ?
+                suggestNextPointTPE(observations) :
+                suggestNextPoint(observations, "ei", used_tpe);
+        } catch (...) {
+            gp_error = true;
+            used_tpe = true;
+            next = suggestNextPointTPE(observations);
+        }
+
+        if (next.acquisition_value <= -1e9f) {
+            gp_error = true;
+            used_tpe = true;
+            next = suggestNextPointTPE(observations);
+        }
+
         ObservationPoint pt;
         pt.params = next.params;
         pt.objective_value = objective_fn_ ? -objective_fn_(pt.params) : -defaultObjective(pt.params);
         observations.push_back(pt);
+        iters_done++;
     }
 
     float best_val = std::numeric_limits<float>::lowest();
@@ -87,6 +134,20 @@ EnvOptimizationResult BayesOpt::optimize(
             best_params = obs.params;
         }
     }
+
+    float convergence_gap = 0.0f;
+    if (iters_done >= 5) {
+        size_t n = observations.size();
+        if (n >= 5) {
+            float first = observations[n - 5].objective_value;
+            float last = observations[n - 1].objective_value;
+            convergence_gap = std::abs(last - first);
+        }
+    }
+    bool converged = checkConvergence(observations);
+
+    auto t_end = std::chrono::steady_clock::now();
+    uint32_t elapsed_total = (uint32_t)std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
 
     EnvOptimizationResult result;
     result.timestamp = now_s();
@@ -102,11 +163,31 @@ EnvOptimizationResult BayesOpt::optimize(
         : 0.0f;
     result.current_temperature = current_env.temperature;
     result.current_humidity = current_env.humidity;
+
+    if (diag) {
+        diag->iterations_performed = iters_done;
+        diag->time_elapsed_ms = elapsed_total;
+        diag->convergence_gap = convergence_gap;
+        diag->used_tpe_fallback = used_tpe;
+        if (timed_out) {
+            diag->status = BOPT_WARN_TIMEOUT;
+            diag->message = "Optimization timed out, returning best-so-far";
+        } else if (used_tpe) {
+            diag->status = BOPT_WARN_TPE_FALLBACK;
+            diag->message = "GP failure, switched to TPE sampling";
+        } else if (!converged && iters_done == max_it) {
+            diag->status = BOPT_WARN_NO_CONVERGENCE;
+            diag->message = "Reached max iterations without convergence";
+        }
+    }
+
     return result;
 }
 
 AcquisitionResult BayesOpt::suggestNextPoint(
-    const std::vector<ObservationPoint>& observations) {
+    const std::vector<ObservationPoint>& observations,
+    const std::string& acquisition,
+    bool use_tpe) {
 
     auto candidates = generateRandomCandidates(100);
 
@@ -390,6 +471,120 @@ float BayesOpt::defaultObjective(const EnvParameters& params) const {
     float rate_monthly = (k1 * LF * 50.0f + k2 * rh_factor * 0.15f) * 30.0f * 24.0f * 100.0f;
 
     return std::max(0.001f, rate_monthly);
+}
+
+AcquisitionResult BayesOpt::suggestNextPointTPE(
+    const std::vector<ObservationPoint>& observations,
+    uint32_t top_n_percent) {
+
+    AcquisitionResult result;
+    result.acquisition_value = std::numeric_limits<float>::lowest();
+
+    if (observations.empty()) {
+        auto cands = generateRandomCandidates(1);
+        if (!cands.empty()) {
+            result.params = cands[0];
+            result.params = clampParams(result.params);
+            result.predicted_mean = 0.0f;
+            result.predicted_std = gp_params_.signal_variance;
+            result.acquisition_value = 0.5f;
+        }
+        return result;
+    }
+
+    std::vector<ObservationPoint> sorted_obs = observations;
+    std::sort(sorted_obs.begin(), sorted_obs.end(),
+        [](const ObservationPoint& a, const ObservationPoint& b) {
+            return a.objective_value > b.objective_value;
+        });
+
+    uint32_t n_good = std::max(1u, (uint32_t)(sorted_obs.size() * top_n_percent / 100));
+    if (n_good > sorted_obs.size()) n_good = (uint32_t)sorted_obs.size();
+
+    std::vector<EnvParameters> good_params, bad_params;
+    for (uint32_t i = 0; i < n_good; ++i) {
+        good_params.push_back(sorted_obs[i].params);
+    }
+    for (uint32_t i = n_good; i < sorted_obs.size(); ++i) {
+        bad_params.push_back(sorted_obs[i].params);
+    }
+
+    auto compute_mean_std = [](const std::vector<EnvParameters>& arr, int which) {
+        float sum = 0.0f, sum2 = 0.0f;
+        size_t n = arr.size();
+        if (n == 0) return std::make_pair(0.0f, 1.0f);
+        for (auto& p : arr) {
+            float v = (which == 0) ? p.temperature : (which == 1) ? p.humidity : p.light_filter;
+            sum += v;
+            sum2 += v * v;
+        }
+        float mean = sum / n;
+        float var = sum2 / n - mean * mean;
+        float std = std::sqrt(std::max(0.0001f, var));
+        return std::make_pair(mean, std);
+    };
+
+    auto [t_mean_g, t_std_g] = compute_mean_std(good_params, 0);
+    auto [h_mean_g, h_std_g] = compute_mean_std(good_params, 1);
+    auto [f_mean_g, f_std_g] = compute_mean_std(good_params, 2);
+    auto [t_mean_b, t_std_b] = compute_mean_std(bad_params, 0);
+    auto [h_mean_b, h_std_b] = compute_mean_std(bad_params, 1);
+    auto [f_mean_b, f_std_b] = compute_mean_std(bad_params, 2);
+
+    float t_std = std::max(t_std_g, t_std_b);
+    float h_std = std::max(h_std_g, h_std_b);
+    float f_std = std::max(f_std_g, f_std_b);
+
+    auto norm_pdf = [](float x, float mu, float s) -> float {
+        float z = (x - mu) / (s + 1e-9f);
+        return std::exp(-0.5f * z * z) / (std::sqrt(2.0f * 3.14159265f) * s);
+    };
+
+    auto candidates = generateRandomCandidates(300);
+    for (auto& cand : candidates) {
+        float l_t = norm_pdf(cand.temperature, t_mean_g, t_std);
+        float l_h = norm_pdf(cand.humidity, h_mean_g, h_std);
+        float l_f = norm_pdf(cand.light_filter, f_mean_g, f_std);
+        float like_good = l_t * l_h * l_f;
+
+        float g_t = norm_pdf(cand.temperature, t_mean_b, t_std);
+        float g_h = norm_pdf(cand.humidity, h_mean_b, h_std);
+        float g_f = norm_pdf(cand.light_filter, f_mean_b, f_std);
+        float like_bad = g_t * g_h * g_f;
+
+        float ei_approx = like_bad > 1e-12f ? like_good / like_bad : 1e6f;
+        if (ei_approx > result.acquisition_value) {
+            result.acquisition_value = ei_approx;
+            result.params = cand;
+        }
+    }
+    result.params = clampParams(result.params);
+    result.predicted_mean = 0.0f;
+    result.predicted_std = 0.0f;
+    return result;
+}
+
+bool BayesOpt::checkConvergence(
+    const std::vector<ObservationPoint>& observations,
+    float tol,
+    uint32_t window) const {
+
+    if (observations.size() < window) return false;
+
+    float best_so_far = std::numeric_limits<float>::lowest();
+    for (auto& o : observations) {
+        if (o.objective_value > best_so_far) best_so_far = o.objective_value;
+    }
+
+    uint32_t n = (uint32_t)observations.size();
+    bool improved = false;
+    for (uint32_t i = std::max(0u, n - window); i < n; ++i) {
+        if (best_so_far - observations[i].objective_value < tol) {
+            improved = true;
+            break;
+        }
+    }
+    return improved;
 }
 
 }
