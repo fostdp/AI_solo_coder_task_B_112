@@ -34,9 +34,40 @@ std::vector<SlipMatchResult> CnnMatcher::findMatches(
     uint32_t query_slip_id,
     const std::vector<uint32_t>& candidate_ids,
     const std::vector<SpectralData>& query_spectral,
-    const std::unordered_map<uint32_t, std::vector<SpectralData>>& candidate_spectral) {
+    const std::unordered_map<uint32_t, std::vector<SpectralData>>& candidate_spectral,
+    MatchStatus* status) {
 
     std::vector<SlipMatchResult> results;
+    if (status) {
+        status->code = MATCHER_OK;
+        status->message.clear();
+        status->has_warning = false;
+        status->edge_damage_ratio_a = 0.0f;
+        status->edge_damage_ratio_b = 0.0f;
+    }
+
+    MatcherError err = validateMatchInput(query_spectral, candidate_ids, candidate_spectral);
+    if (err != MATCHER_OK) {
+        if (status) {
+            status->code = err;
+            switch (err) {
+                case MATCHER_ERR_EMPTY_IMAGE:
+                    status->message = "Query image data missing or empty"; break;
+                case MATCHER_ERR_INSUFFICIENT_POINTS:
+                    status->message = "Insufficient spectral sampling points"; break;
+                case MATCHER_ERR_NO_CANDIDATES:
+                    status->message = "No valid candidates provided"; break;
+                case MATCHER_ERR_MODEL_NOT_LOADED:
+                    status->message = "Matcher model not loaded"; break;
+                default:
+                    status->message = "Unknown validation error";
+            }
+        }
+        return results;
+    }
+
+    auto query_contour = spectralToContourFeatures(query_spectral);
+    float query_damage = estimateEdgeDamageRatio(query_contour);
 
     auto query_stroke_emb = extractStrokeEmbedding(query_spectral);
     auto query_contour_emb = extractContourEmbedding(query_spectral);
@@ -53,8 +84,13 @@ std::vector<SlipMatchResult> CnnMatcher::findMatches(
         float stroke_sim = cosineSimilarity(query_stroke_emb, cand_stroke_emb);
         float contour_sim = cosineSimilarity(query_contour_emb, cand_contour_emb);
 
+        auto cand_contour = spectralToContourFeatures(it->second);
+        float cand_damage = estimateEdgeDamageRatio(cand_contour);
+
         float composite = config_.stroke_weight * stroke_sim +
                          config_.contour_weight * contour_sim;
+
+        composite = applyDamagePenalty(composite, query_damage, cand_damage);
 
         if (composite >= config_.match_threshold) {
             SlipMatchResult r;
@@ -65,6 +101,15 @@ std::vector<SlipMatchResult> CnnMatcher::findMatches(
             r.composite_score = composite;
             r.match_level = classifyMatchLevel(composite);
             results.push_back(r);
+
+            if (status && (query_damage > 0.5f || cand_damage > 0.5f)) {
+                status->has_warning = true;
+                status->edge_damage_ratio_a = query_damage;
+                status->edge_damage_ratio_b = cand_damage;
+                if (status->message.empty()) {
+                    status->message = "Edge damage > 50% detected, match score penalized";
+                }
+            }
         }
     }
 
@@ -277,6 +322,64 @@ uint8_t CnnMatcher::classifyMatchLevel(float score) const {
     if (score >= 0.7f) return 2;
     if (score >= 0.6f) return 1;
     return 0;
+}
+
+float CnnMatcher::estimateEdgeDamageRatio(const ContourFeatures& f) const {
+    if (f.edge_completeness > 1.0f) return 0.0f;
+    if (f.edge_completeness < 0.0f) return 1.0f;
+    return 1.0f - f.edge_completeness;
+}
+
+float CnnMatcher::applyDamagePenalty(float base_similarity, float damage_a, float damage_b) const {
+    float max_damage = std::max(damage_a, damage_b);
+    if (max_damage < 0.1f) return base_similarity;
+
+    float penalty = 1.0f;
+    if (max_damage >= 0.9f) {
+        penalty = 0.15f;
+    } else if (max_damage >= 0.75f) {
+        penalty = 0.35f;
+    } else if (max_damage >= 0.6f) {
+        penalty = 0.55f;
+    } else if (max_damage >= 0.5f) {
+        penalty = 0.70f;
+    } else if (max_damage >= 0.3f) {
+        penalty = 0.85f;
+    } else {
+        penalty = 0.95f;
+    }
+    return base_similarity * penalty;
+}
+
+MatcherError CnnMatcher::validateMatchInput(
+    const std::vector<SpectralData>& query,
+    const std::vector<uint32_t>& candidates,
+    const std::unordered_map<uint32_t, std::vector<SpectralData>>& candidate_spectral) const {
+
+    if (!model_loaded_.load()) return MATCHER_ERR_MODEL_NOT_LOADED;
+    if (isImageMissing(query)) return MATCHER_ERR_EMPTY_IMAGE;
+    if (query.size() < 3) return MATCHER_ERR_INSUFFICIENT_POINTS;
+    if (candidates.empty()) return MATCHER_ERR_NO_CANDIDATES;
+
+    bool any_valid = false;
+    for (auto id : candidates) {
+        auto it = candidate_spectral.find(id);
+        if (it != candidate_spectral.end() && !isImageMissing(it->second)) {
+            any_valid = true;
+            break;
+        }
+    }
+    if (!any_valid) return MATCHER_ERR_EMPTY_IMAGE;
+
+    return MATCHER_OK;
+}
+
+bool CnnMatcher::isImageMissing(const std::vector<SpectralData>& spectral) const {
+    if (spectral.empty()) return true;
+    float sum = 0.0f;
+    for (auto& d : spectral) sum += d.reflectance;
+    if (sum < 1e-6f) return true;
+    return false;
 }
 
 }
