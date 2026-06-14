@@ -1,0 +1,7 @@
+D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest/CMakeFiles/test_fading_predictor.dir
+D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest/CMakeFiles/test_mold_engine.dir
+D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest/CMakeFiles/test_config_loader.dir
+D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest/CMakeFiles/test_message_bus.dir
+D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest/CMakeFiles/test.dir
+D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest/CMakeFiles/edit_cache.dir
+D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest/CMakeFiles/rebuild_cache.dir
