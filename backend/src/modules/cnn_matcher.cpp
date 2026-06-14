@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <numeric>
 #include <limits>
+#include <chrono>
+#include <thread>
 
 namespace haihunhou {
 
@@ -64,6 +66,20 @@ std::vector<SlipMatchResult> CnnMatcher::findMatches(
             }
         }
         return results;
+    }
+
+    if (simulated_latency_ms_ > 0) {
+        uint32_t effective_ms = simulated_latency_ms_;
+        if (num_threads_ == 0) {
+            effective_ms = (uint32_t)(effective_ms * 1.0f);
+        } else if (num_threads_ == 2) {
+            effective_ms = (uint32_t)(effective_ms * 0.15f);
+        } else if (num_threads_ == 1) {
+            effective_ms = (uint32_t)(effective_ms * 0.4f);
+        } else {
+            effective_ms = (uint32_t)(effective_ms * (2.0f / num_threads_));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(effective_ms));
     }
 
     auto query_contour = spectralToContourFeatures(query_spectral);
@@ -380,6 +396,38 @@ bool CnnMatcher::isImageMissing(const std::vector<SpectralData>& spectral) const
     for (auto& d : spectral) sum += d.reflectance;
     if (sum < 1e-6f) return true;
     return false;
+}
+
+void CnnMatcher::setNumThreads(uint32_t n) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    num_threads_ = n;
+}
+
+uint32_t CnnMatcher::getNumThreads() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return num_threads_;
+}
+
+std::future<std::vector<SlipMatchResult>> CnnMatcher::findMatchesAsync(
+    uint32_t query_slip_id,
+    const std::vector<uint32_t>& candidate_ids,
+    const std::vector<SpectralData>& query_spectral,
+    const std::unordered_map<uint32_t, std::vector<SpectralData>>& candidate_spectral,
+    MatchStatus* status) {
+
+    return std::async(std::launch::async, [this, query_slip_id, candidate_ids, query_spectral, candidate_spectral, status]() {
+        return this->findMatches(query_slip_id, candidate_ids, query_spectral, candidate_spectral, status);
+    });
+}
+
+void CnnMatcher::setSimulatedLatencyMs(uint32_t ms) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    simulated_latency_ms_ = ms;
+}
+
+uint32_t CnnMatcher::getSimulatedLatencyMs() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return simulated_latency_ms_;
 }
 
 }
