@@ -67,3 +67,35 @@ add_executable(test_bayes_opt
 )
 target_compile_definitions(test_bayes_opt PRIVATE TEST_STUB)
 add_test(NAME test_bayes_opt COMMAND test_bayes_opt)
+
+add_executable(test_enhanced_slip_matching
+    tests/test_enhanced_slip_matching.cpp
+    backend/src/modules/cnn_matcher.cpp
+    tests/stub_clickhouse.cpp
+)
+target_compile_definitions(test_enhanced_slip_matching PRIVATE TEST_STUB)
+add_test(NAME test_enhanced_slip_matching COMMAND test_enhanced_slip_matching)
+
+add_executable(test_enhanced_plsr
+    tests/test_enhanced_plsr.cpp
+    backend/src/modules/plsr_inversion.cpp
+    tests/stub_clickhouse.cpp
+)
+target_compile_definitions(test_enhanced_plsr PRIVATE TEST_STUB)
+add_test(NAME test_enhanced_plsr COMMAND test_enhanced_plsr)
+
+add_executable(test_enhanced_rf
+    tests/test_enhanced_rf.cpp
+    backend/src/modules/rf_corrosion.cpp
+    tests/stub_clickhouse.cpp
+)
+target_compile_definitions(test_enhanced_rf PRIVATE TEST_STUB)
+add_test(NAME test_enhanced_rf COMMAND test_enhanced_rf)
+
+add_executable(test_enhanced_bayes
+    tests/test_enhanced_bayes.cpp
+    backend/src/modules/bayes_opt.cpp
+    tests/stub_clickhouse.cpp
+)
+target_compile_definitions(test_enhanced_bayes PRIVATE TEST_STUB)
+add_test(NAME test_enhanced_bayes COMMAND test_enhanced_bayes)
