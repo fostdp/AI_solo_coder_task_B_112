@@ -249,6 +249,9 @@ AcquisitionResult BayesOpt::suggestNextPoint(
             ei = (mean - y_best) * normalCDF(z) + std * normalPDF(z);
         }
 
+        float penalty = computeBoundaryPenalty(cand);
+        ei *= penalty;
+
         if (ei > best_result.acquisition_value) {
             best_result.params = cand;
             best_result.acquisition_value = ei;
@@ -473,6 +476,28 @@ float BayesOpt::defaultObjective(const EnvParameters& params) const {
     return std::max(0.001f, rate_monthly);
 }
 
+float BayesOpt::computeBoundaryPenalty(const EnvParameters& p) const {
+    if (config_.boundary_penalty_strength <= 0.0f) return 1.0f;
+
+    float t_rng = config_.temperature_max - config_.temperature_min;
+    float h_rng = config_.humidity_max - config_.humidity_min;
+    float f_rng = config_.light_filter_max - config_.light_filter_min;
+
+    float t_d = t_rng > 0 ? std::min(p.temperature - config_.temperature_min, config_.temperature_max - p.temperature) / t_rng : 0.5f;
+    float h_d = h_rng > 0 ? std::min(p.humidity - config_.humidity_min, config_.humidity_max - p.humidity) / h_rng : 0.5f;
+    float f_d = f_rng > 0 ? std::min(p.light_filter - config_.light_filter_min, config_.light_filter_max - p.light_filter) / f_rng : 0.5f;
+
+    t_d = std::max(0.0f, std::min(0.5f, t_d));
+    h_d = std::max(0.0f, std::min(0.5f, h_d));
+    f_d = std::max(0.0f, std::min(0.5f, f_d));
+
+    float min_d = std::min({t_d, h_d, f_d});
+    float scale = config_.boundary_penalty_scale > 0 ? config_.boundary_penalty_scale : 0.15f;
+
+    float penalty = 1.0f - config_.boundary_penalty_strength * std::exp(-min_d / scale);
+    return std::max(0.01f, penalty);
+}
+
 AcquisitionResult BayesOpt::suggestNextPointTPE(
     const std::vector<ObservationPoint>& observations,
     uint32_t top_n_percent) {
@@ -553,6 +578,7 @@ AcquisitionResult BayesOpt::suggestNextPointTPE(
         float like_bad = g_t * g_h * g_f;
 
         float ei_approx = like_bad > 1e-12f ? like_good / like_bad : 1e6f;
+        ei_approx *= computeBoundaryPenalty(cand);
         if (ei_approx > result.acquisition_value) {
             result.acquisition_value = ei_approx;
             result.params = cand;
