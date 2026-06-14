@@ -34,6 +34,23 @@ struct AcquisitionResult {
     float predicted_std;
 };
 
+enum BayesOptStatus {
+    BOPT_OK = 0,
+    BOPT_WARN_TIMEOUT = 1,
+    BOPT_WARN_TPE_FALLBACK = 2,
+    BOPT_ERR_INVALID_PARAMS = 3,
+    BOPT_WARN_NO_CONVERGENCE = 4
+};
+
+struct OptimizationDiagnostics {
+    BayesOptStatus status = BOPT_OK;
+    uint32_t iterations_performed = 0;
+    uint32_t time_elapsed_ms = 0;
+    bool used_tpe_fallback = false;
+    float convergence_gap = 0.0f;
+    std::string message;
+};
+
 class BayesOpt {
 public:
     using ObjectiveFunction = std::function<float(const EnvParameters&)>;
@@ -52,10 +69,14 @@ public:
     EnvOptimizationResult optimize(
         uint32_t zone_id,
         const EnvParameters& current_env,
-        float current_fading_rate);
+        float current_fading_rate,
+        OptimizationDiagnostics* diag = nullptr,
+        uint32_t timeout_ms = 0);
 
     AcquisitionResult suggestNextPoint(
-        const std::vector<ObservationPoint>& observations);
+        const std::vector<ObservationPoint>& observations,
+        const std::string& acquisition = "ei",
+        bool use_tpe = false);
 
     std::pair<float, float> predict(
         const EnvParameters& x,
@@ -77,6 +98,15 @@ public:
         float y_best);
 
     float computeLifespan(float fading_rate_monthly) const;
+
+    AcquisitionResult suggestNextPointTPE(
+        const std::vector<ObservationPoint>& observations,
+        uint32_t top_n_percent = 25);
+
+    bool checkConvergence(
+        const std::vector<ObservationPoint>& observations,
+        float tol = 1e-3f,
+        uint32_t window = 5) const;
 
 private:
     BayesOptConfig config_;
