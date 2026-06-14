@@ -6,6 +6,10 @@
 #include "mold_engine.h"
 #include "alert_broker.h"
 #include "http_server.h"
+#include "cnn_matcher.h"
+#include "plsr_inversion.h"
+#include "rf_corrosion.h"
+#include "bayes_opt.h"
 #include <iostream>
 #include <csignal>
 #include <atomic>
@@ -91,7 +95,7 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "OK\n";
 
-    std::cout << "[6/6] Starting AlertBroker module... ";
+    std::cout << "[6/10] Starting AlertBroker module... ";
     AlertBroker alert_broker(db, bus);
     alert_broker.setConfig(cfg.alert_config);
     alert_broker.setNotificationConfig(cfg.notification_config);
@@ -99,6 +103,38 @@ int main(int argc, char* argv[]) {
         std::cout << "FAILED\n";
         return 1;
     }
+    std::cout << "OK\n";
+
+    std::cout << "[7/10] Initializing CNN SlipMatcher module... ";
+    CnnMatcher cnn_matcher;
+    cnn_matcher.setConfig(cfg.cnn_matcher_config);
+    if (!cnn_matcher.loadModel()) {
+        std::cout << "WARNING (using default)\n";
+    } else {
+        std::cout << "OK\n";
+    }
+
+    std::cout << "[8/10] Initializing PLSR Ink Composition module... ";
+    PlsrInversion plsr;
+    plsr.setConfig(cfg.plsr_config);
+    if (!plsr.loadCoefficients()) {
+        std::cout << "WARNING (using default)\n";
+    } else {
+        std::cout << "OK\n";
+    }
+
+    std::cout << "[9/10] Initializing RF Corrosion Prediction module... ";
+    RfCorrosion rf_corrosion;
+    rf_corrosion.setConfig(cfg.rf_corrosion_config);
+    if (!rf_corrosion.loadModel()) {
+        std::cout << "WARNING (using default)\n";
+    } else {
+        std::cout << "OK\n";
+    }
+
+    std::cout << "[10/10] Initializing Bayesian Optimization module... ";
+    BayesOpt bayes_opt;
+    bayes_opt.setConfig(cfg.bayes_opt_config);
     std::cout << "OK\n\n";
 
     FadingModel fading_model_compat;
@@ -116,7 +152,9 @@ int main(int argc, char* argv[]) {
     alert_engine_compat.setConfig(ac);
 
     HttpServer http_server(db, alert_engine_compat, fading_model_compat,
-                           mold_model_compat, cfg.http_server.port,
+                           mold_model_compat, &cnn_matcher, &plsr,
+                           &rf_corrosion, &bayes_opt,
+                           cfg.http_server.port,
                            cfg.http_server.frontend_dir);
 
     if (!http_server.start()) {
