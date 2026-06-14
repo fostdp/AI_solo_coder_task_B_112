@@ -99,6 +99,11 @@ public:
         const RamanReference& raman,
         float tolerance_pct = 5.0f) const;
 
+    std::vector<float> smoothSpectrumSavitzkyGolay(
+        const std::vector<float>& spectrum,
+        uint32_t window_size = 5,
+        uint32_t poly_order = 2) const;
+
 private:
     PlsrInversionConfig config_;
     PlsrCoefficients coeffs_;
