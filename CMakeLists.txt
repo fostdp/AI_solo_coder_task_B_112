@@ -99,3 +99,14 @@ add_executable(test_enhanced_bayes
 )
 target_compile_definitions(test_enhanced_bayes PRIVATE TEST_STUB)
 add_test(NAME test_enhanced_bayes COMMAND test_enhanced_bayes)
+
+add_executable(test_defect_fixes
+    tests/test_defect_fixes.cpp
+    backend/src/modules/cnn_matcher.cpp
+    backend/src/modules/plsr_inversion.cpp
+    backend/src/modules/bayes_opt.cpp
+    tests/stub_clickhouse.cpp
+)
+target_compile_definitions(test_defect_fixes PRIVATE TEST_STUB)
+target_include_directories(test_defect_fixes PRIVATE include tests)
+add_test(NAME test_defect_fixes COMMAND test_defect_fixes)
