@@ -35,3 +35,35 @@ add_executable(test_message_bus
     tests/test_message_bus.cpp
 )
 add_test(NAME test_message_bus COMMAND test_message_bus)
+
+add_executable(test_cnn_matcher
+    tests/test_cnn_matcher.cpp
+    backend/src/modules/cnn_matcher.cpp
+    tests/stub_clickhouse.cpp
+)
+target_compile_definitions(test_cnn_matcher PRIVATE TEST_STUB)
+add_test(NAME test_cnn_matcher COMMAND test_cnn_matcher)
+
+add_executable(test_plsr_inversion
+    tests/test_plsr_inversion.cpp
+    backend/src/modules/plsr_inversion.cpp
+    tests/stub_clickhouse.cpp
+)
+target_compile_definitions(test_plsr_inversion PRIVATE TEST_STUB)
+add_test(NAME test_plsr_inversion COMMAND test_plsr_inversion)
+
+add_executable(test_rf_corrosion
+    tests/test_rf_corrosion.cpp
+    backend/src/modules/rf_corrosion.cpp
+    tests/stub_clickhouse.cpp
+)
+target_compile_definitions(test_rf_corrosion PRIVATE TEST_STUB)
+add_test(NAME test_rf_corrosion COMMAND test_rf_corrosion)
+
+add_executable(test_bayes_opt
+    tests/test_bayes_opt.cpp
+    backend/src/modules/bayes_opt.cpp
+    tests/stub_clickhouse.cpp
+)
+target_compile_definitions(test_bayes_opt PRIVATE TEST_STUB)
+add_test(NAME test_bayes_opt COMMAND test_bayes_opt)
