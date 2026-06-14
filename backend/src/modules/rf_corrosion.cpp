@@ -56,14 +56,60 @@ CorrosionPrediction RfCorrosion::analyzeSlip(
     const MicrobialData& microbial,
     float temperature,
     float humidity,
-    const std::vector<float>& voc_profile) {
+    const std::vector<float>& voc_profile,
+    CorrosionDiagnostics* diag) {
+
+    if (diag) {
+        diag->status = RF_OK;
+        diag->imputed_feature_count = 0;
+        diag->imputed_feature_names.clear();
+        diag->warning_message.clear();
+        diag->is_extreme_concentration = false;
+    }
 
     auto features = simulateVocFromMicrobial(microbial, temperature, humidity);
+
+    if (microbial.fungi_concentration <= 1.0f) {
+        if (diag) {
+            diag->status = RF_ERR_NO_MOLD;
+            diag->warning_message = "No mold detected, corrosion factor set to baseline 1.0";
+        }
+        CorrosionPrediction result;
+        result.timestamp = now_s();
+        result.slip_id = slip_id;
+        result.ochratoxin_concentration = 0.0f;
+        result.citrinin_concentration = 0.0f;
+        result.voctotal = 0.0f;
+        result.corrosion_factor = 1.0f;
+        result.predicted_damage_rate = 0.0f;
+        result.risk_level = 1;
+        return result;
+    }
 
     if (!voc_profile.empty() && voc_profile.size() >= 3) {
         features.ochratoxin_a = voc_profile[0];
         features.citrinin = voc_profile[1];
         features.total_voc = voc_profile[2];
+    }
+
+    features = imputeMissingFeatures(features, diag ? &(diag->imputed_feature_names) : nullptr);
+    if (diag) {
+        diag->imputed_feature_count = (uint32_t)diag->imputed_feature_names.size();
+        if (diag->imputed_feature_count > 0) {
+            diag->status = RF_WARN_MISSING_FEATURES;
+            diag->warning_message = std::to_string(diag->imputed_feature_count) +
+                                    " features imputed with median values";
+        }
+    }
+
+    if (isExtremeConcentration(features)) {
+        if (diag) {
+            if (diag->status == RF_OK) diag->status = RF_WARN_EXTREME_CONCENTRATION;
+            diag->is_extreme_concentration = true;
+            if (diag->warning_message.empty()) {
+                diag->warning_message = "Extreme toxin concentration detected, values clipped";
+            }
+        }
     }
 
     float std_dev;
@@ -85,15 +131,45 @@ CorrosionPrediction RfCorrosion::analyzeSlip(
     return result;
 }
 
-float RfCorrosion::predictCorrosionFactor(const CorrosionFeatures& features) {
+float RfCorrosion::predictCorrosionFactor(const CorrosionFeatures& features,
+                                          CorrosionDiagnostics* diag) {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto feat_vec = extractFeatures(features);
+
+    if (features.fungi_concentration <= 1.0f) {
+        if (diag) {
+            diag->status = RF_ERR_NO_MOLD;
+            diag->warning_message = "No mold detected, corrosion factor set to baseline 1.0";
+            diag->imputed_feature_count = 0;
+            diag->imputed_feature_names.clear();
+            diag->is_extreme_concentration = false;
+        }
+        return 1.0f;
+    }
+
+    CorrosionFeatures f = features;
+    std::vector<std::string> imputed;
+    f = imputeMissingFeatures(f, &imputed);
+
+    if (diag) {
+        diag->imputed_feature_count = (uint32_t)imputed.size();
+        diag->imputed_feature_names = imputed;
+        diag->status = imputed.empty() ? RF_OK : RF_WARN_MISSING_FEATURES;
+        diag->is_extreme_concentration = isExtremeConcentration(f);
+        if (diag->is_extreme_concentration) {
+            diag->status = RF_WARN_EXTREME_CONCENTRATION;
+            diag->warning_message = "Extreme mycotoxin, VOC or fungal concentration detected";
+        }
+    }
+
+    auto feat_vec = extractFeatures(f);
     std::vector<float> preds;
     preds.reserve(model_.trees.size());
     for (auto& tree : model_.trees) {
         preds.push_back(tree.predict(feat_vec));
     }
-    return aggregatePredictions(preds);
+    float factor = aggregatePredictions(preds);
+    return std::max(config_.min_corrosion_factor,
+                    std::min(config_.max_corrosion_factor, factor));
 }
 
 std::vector<float> RfCorrosion::predictWithConfidence(
@@ -260,6 +336,54 @@ bool RfCorrosion::generateDefaultModel() {
 bool RfCorrosion::saveModelToJson(const std::string& path) const {
     (void)path;
     return true;
+}
+
+static const std::vector<std::string> g_feature_names = {
+    "temperature", "humidity", "fungi_concentration",
+    "ochratoxin_a", "citrinin", "patulin", "total_voc", "ph_value"
+};
+
+static const float g_feature_medians[8] = {
+    22.0f,  55.0f,  30.0f,
+    1.0f,   2.0f,   0.5f,
+    40.0f,  6.0f
+};
+
+const float* RfCorrosion::getFeatureMedians() {
+    return g_feature_medians;
+}
+
+CorrosionFeatures RfCorrosion::imputeMissingFeatures(
+    CorrosionFeatures f,
+    std::vector<std::string>* imputed_names) const {
+
+    const float* medians = getFeatureMedians();
+    float* vals[8] = {
+        &f.temperature, &f.humidity, &f.fungi_concentration,
+        &f.ochratoxin_a, &f.citrinin, &f.patulin,
+        &f.total_voc, &f.ph_value
+    };
+    for (int i = 0; i < 8; ++i) {
+        if (!f.has_feature[i]) {
+            *vals[i] = medians[i];
+            f.has_feature[i] = true;
+            if (imputed_names) {
+                imputed_names->push_back(g_feature_names[i]);
+            }
+        }
+    }
+    return f;
+}
+
+bool RfCorrosion::isExtremeConcentration(const CorrosionFeatures& f) const {
+    const float ochra_limit = 20.0f;
+    const float citrinin_limit = 30.0f;
+    const float voc_limit = 300.0f;
+    const float fungi_limit = 1000.0f;
+    return (f.ochratoxin_a > ochra_limit ||
+            f.citrinin > citrinin_limit ||
+            f.total_voc > voc_limit ||
+            f.fungi_concentration > fungi_limit);
 }
 
 }
