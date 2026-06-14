@@ -54,6 +54,23 @@ struct CorrosionFeatures {
     float patulin;
     float total_voc;
     float ph_value;
+    bool has_feature[8] = {true, true, true, true, true, true, true, true};
+};
+
+enum RfStatus {
+    RF_OK = 0,
+    RF_ERR_NO_MOLD = 1,
+    RF_WARN_MISSING_FEATURES = 2,
+    RF_ERR_MODEL_NOT_LOADED = 3,
+    RF_WARN_EXTREME_CONCENTRATION = 4
+};
+
+struct CorrosionDiagnostics {
+    RfStatus status = RF_OK;
+    uint32_t imputed_feature_count = 0;
+    std::vector<std::string> imputed_feature_names;
+    std::string warning_message;
+    bool is_extreme_concentration = false;
 };
 
 class RfCorrosion {
@@ -73,9 +90,11 @@ public:
         const MicrobialData& microbial,
         float temperature,
         float humidity,
-        const std::vector<float>& voc_profile = {});
+        const std::vector<float>& voc_profile = {},
+        CorrosionDiagnostics* diag = nullptr);
 
-    float predictCorrosionFactor(const CorrosionFeatures& features);
+    float predictCorrosionFactor(const CorrosionFeatures& features,
+                                 CorrosionDiagnostics* diag = nullptr);
 
     std::vector<float> predictWithConfidence(
         const CorrosionFeatures& features,
@@ -86,6 +105,13 @@ public:
         const CorrosionFeatures& features);
 
     std::vector<std::pair<std::string, float>> getFeatureImportance() const;
+
+    CorrosionFeatures imputeMissingFeatures(CorrosionFeatures f,
+                                            std::vector<std::string>* imputed_names = nullptr) const;
+
+    static const float* getFeatureMedians();
+
+    bool isExtremeConcentration(const CorrosionFeatures& f) const;
 
 private:
     RfCorrosionConfig config_;
