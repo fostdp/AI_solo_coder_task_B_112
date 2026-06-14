@@ -1,0 +1,42 @@
+FROM ubuntu:22.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    libboost-all-dev \
+    libssl-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY CMakeLists.txt .
+COPY include/ include/
+COPY backend/ backend/
+COPY opc_simulator/ opc_simulator/
+
+RUN mkdir -p build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release && \
+    make opcua_simulator -j$(nproc)
+
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    libboost-system1.74.0 \
+    libboost-thread1.74.0 \
+    libboost-chrono1.74.0 \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /app/build/opc_simulator/opcua_simulator /app/opcua_simulator
+
+ENV SERVER_URL=http://backend:8080
+ENV REPORT_INTERVAL=21600
+
+CMD ["/app/opcua_simulator", "--server", "$SERVER_URL", "--interval", "$REPORT_INTERVAL"]
