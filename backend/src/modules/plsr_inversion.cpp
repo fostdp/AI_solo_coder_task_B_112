@@ -102,6 +102,12 @@ PlsrPrediction PlsrInversion::predict(const std::vector<float>& spectrum) {
     std::lock_guard<std::mutex> lock(mutex_);
     PlsrPrediction pred;
 
+    std::vector<float> input_spectrum = spectrum;
+    if (config_.enable_smoothing && !spectrum.empty()) {
+        input_spectrum = smoothSpectrumSavitzkyGolay(
+            input_spectrum, config_.smooth_window_size, config_.smooth_poly_order);
+    }
+
     if (!loaded_ || coeffs_.n_features == 0) {
         pred.carbon_black_ratio = 0.65f;
         pred.binder_ratio = 0.20f;
@@ -113,7 +119,7 @@ PlsrPrediction PlsrInversion::predict(const std::vector<float>& spectrum) {
         return pred;
     }
 
-    auto x_std = standardizeInput(spectrum);
+    auto x_std = standardizeInput(input_spectrum);
 
     std::vector<float> scores(coeffs_.n_components, 0.0f);
     for (uint32_t h = 0; h < coeffs_.n_components; ++h) {
@@ -151,8 +157,8 @@ PlsrPrediction PlsrInversion::predict(const std::vector<float>& spectrum) {
     }
 
     pred.hotelling_t2 = hotellingT2(scores);
-    pred.q_residual = qResidual(spectrum, scores, coeffs_.P);
-    pred.confidence = calculateConfidence(pred, spectrum);
+    pred.q_residual = qResidual(input_spectrum, scores, coeffs_.P);
+    pred.confidence = calculateConfidence(pred, input_spectrum);
     return pred;
 }
 
@@ -423,6 +429,97 @@ ValidationResult PlsrInversion::validateAgainstRaman(
     }
     r.details = ss.str();
     return r;
+}
+
+std::vector<float> PlsrInversion::smoothSpectrumSavitzkyGolay(
+    const std::vector<float>& spectrum,
+    uint32_t window_size,
+    uint32_t poly_order) const {
+
+    size_t n = spectrum.size();
+    if (n == 0) return spectrum;
+
+    if (window_size % 2 == 0) window_size++;
+    if (window_size < 3) window_size = 3;
+    if (window_size > n) window_size = (uint32_t)(n | 1);
+    if (window_size <= poly_order) poly_order = window_size - 1;
+
+    int half = (int)window_size / 2;
+    std::vector<float> result(n, 0.0f);
+
+    std::vector<float> extended(2 * half + n);
+    for (int i = 0; i < half; ++i) {
+        extended[i] = spectrum[half - i];
+    }
+    for (size_t i = 0; i < n; ++i) {
+        extended[half + i] = spectrum[i];
+    }
+    for (int i = 0; i < half; ++i) {
+        extended[half + n + i] = spectrum[n - 2 - i];
+    }
+
+    for (size_t i = 0; i < n; ++i) {
+        int center = half + (int)i;
+
+        uint32_t m = window_size;
+        uint32_t order = poly_order;
+        if (order >= m) order = m - 1;
+
+        std::vector<std::vector<float>> A(m, std::vector<float>(order + 1, 0.0f));
+        std::vector<float> y(m, 0.0f);
+
+        for (int j = 0; j < (int)m; ++j) {
+            float x = (float)(j - half);
+            float val = 1.0f;
+            for (uint32_t k = 0; k <= order; ++k) {
+                A[j][k] = val;
+                val *= x;
+            }
+            y[j] = extended[center - half + j];
+        }
+
+        std::vector<std::vector<float>> ATA(order + 1, std::vector<float>(order + 1, 0.0f));
+        std::vector<float> ATy(order + 1, 0.0f);
+        for (uint32_t k = 0; k <= order; ++k) {
+            for (uint32_t j = 0; j <= order; ++j) {
+                float sum = 0.0f;
+                for (uint32_t idx = 0; idx < m; ++idx) {
+                    sum += A[idx][k] * A[idx][j];
+                }
+                ATA[k][j] = sum;
+            }
+            float sum = 0.0f;
+            for (uint32_t idx = 0; idx < m; ++idx) {
+                sum += A[idx][k] * y[idx];
+            }
+            ATy[k] = sum;
+        }
+
+        std::vector<float> coeffs = ATy;
+        std::vector<std::vector<float>> aug = ATA;
+        for (uint32_t col = 0; col <= order; ++col) {
+            float pivot = aug[col][col];
+            if (std::abs(pivot) < 1e-12f) continue;
+            for (uint32_t j = col; j <= order; ++j) {
+                aug[col][j] /= pivot;
+            }
+            coeffs[col] /= pivot;
+
+            for (uint32_t row = 0; row <= order; ++row) {
+                if (row != col && std::abs(aug[row][col]) > 1e-12f) {
+                    float factor = aug[row][col];
+                    for (uint32_t j = col; j <= order; ++j) {
+                        aug[row][j] -= factor * aug[col][j];
+                    }
+                    coeffs[row] -= factor * coeffs[col];
+                }
+            }
+        }
+
+        result[i] = coeffs[0];
+    }
+
+    return result;
 }
 
 }
