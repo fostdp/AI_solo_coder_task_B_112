@@ -415,7 +415,7 @@ std::future<std::vector<SlipMatchResult>> CnnMatcher::findMatchesAsync(
     const std::unordered_map<uint32_t, std::vector<SpectralData>>& candidate_spectral,
     MatchStatus* status) {
 
-    return std::async(std::launch::async, [this, query_slip_id, candidate_ids, query_spectral, candidate_spectral, status]() {
+    return ThreadPool::instance().submit([this, query_slip_id, candidate_ids, query_spectral, candidate_spectral, status]() {
         return this->findMatches(query_slip_id, candidate_ids, query_spectral, candidate_spectral, status);
     });
 }
