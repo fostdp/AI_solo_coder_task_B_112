@@ -1,0 +1,94 @@
+# 海昏侯简牍监测系统配置文件
+
+# ClickHouse 数据库配置
+clickhouse:
+  host: 127.0.0.1
+  port: 8123
+  database: haihunhou
+  user: default
+  password: ""
+  timeout_ms: 10000
+  pool_size: 10
+
+# HTTP 服务器配置
+http_server:
+  host: 0.0.0.0
+  port: 8080
+  frontend_dir: "./frontend"
+  max_request_size: 10485760
+
+# WebSocket 配置
+websocket:
+  ping_interval_sec: 30
+  max_connections: 100
+
+# OPC UA 客户端配置
+opcua:
+  enabled: false
+  server_url: "opc.tcp://localhost:4840"
+  polling_interval_sec: 21600
+  timeout_ms: 5000
+  simulation_mode: true
+
+# 告警配置
+alert:
+  # 墨迹反射率月下降率阈值 (0.2 = 20%)
+  fading_threshold: 0.2
+  # 霉菌浓度阈值 (CFU/cm²)
+  mold_threshold: 100.0
+  # 告警抑制时间 (秒)
+  suppression_window_sec: 86400
+  # 告警检查间隔 (秒)
+  check_interval_sec: 3600
+
+# 通知配置
+notification:
+  dingtalk:
+    enabled: false
+    webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=YOUR_TOKEN"
+    secret: "YOUR_SECRET"
+  email:
+    enabled: false
+    smtp_server: "smtp.example.com"
+    smtp_port: 465
+    use_ssl: true
+    username: "your_email@example.com"
+    password: "your_password"
+    sender_name: "简牍监测系统"
+    recipients:
+      - "admin@example.com"
+      - "conservator@example.com"
+
+# 核心算法参数
+algorithm:
+  fading_model:
+    # 光氧化指前因子
+    A1: 1.0e-8
+    # 光氧化活化能 (kJ/mol)
+    Ea1: 50.0
+    # 水解指前因子
+    A2: 1.0e-9
+    # 水解活化能 (kJ/mol)
+    Ea2: 60.0
+    # 波长指数
+    alpha: 3.0
+    # 湿度指数
+    beta: 2.0
+    # 参考波长 (nm)
+    lambda0: 450
+
+  mold_model:
+    # 响应面模型系数
+    beta0: 1.0
+    beta1: 0.08
+    beta2: 0.06
+    beta3: -0.0015
+    beta4: -0.0008
+    beta5: 0.001
+
+# 日志配置
+logging:
+  level: info
+  file: "logs/server.log"
+  max_file_size_mb: 100
+  max_files: 10
