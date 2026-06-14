@@ -46,6 +46,10 @@ struct ServerConfig {
     MoldParams mold_params;
     AlertBrokerConfig alert_config;
     AlertConfig notification_config;
+    CnnMatcherConfig cnn_matcher_config;
+    PlsrInversionConfig plsr_config;
+    RfCorrosionConfig rf_corrosion_config;
+    BayesOptConfig bayes_opt_config;
 };
 
 class ConfigLoader {
