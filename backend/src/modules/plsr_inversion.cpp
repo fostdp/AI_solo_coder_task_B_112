@@ -53,11 +53,34 @@ bool PlsrInversion::isLoaded() const {
 
 InkComposition PlsrInversion::analyzeSlip(
     uint32_t slip_id,
-    const std::vector<SpectralData>& spectral_curve) {
+    const std::vector<SpectralData>& spectral_curve,
+    PlsrPrediction* details,
+    const RamanReference* raman_ref) {
 
     std::vector<uint16_t> wl = {380, 400, 450, 500, 550, 600, 650, 700, 750, 780};
-    auto spectrum = extractSpectrumVector(spectral_curve, wl);
+    uint32_t interp_count = 0;
+    auto spectrum = extractSpectrumVectorWithInterpolation(spectral_curve, wl, &interp_count);
     auto pred = predict(spectrum);
+
+    pred.missing_band_warning = (interp_count > 0);
+    pred.interpolated_bands = interp_count;
+    pred.out_of_range_warning = isSpectrumOutOfRange(spectrum);
+
+    if (pred.out_of_range_warning) {
+        pred.warning_message = "Spectrum outside model training range, extrapolation warning";
+    } else if (pred.missing_band_warning) {
+        std::stringstream ss;
+        ss << interp_count << " wavelength bands missing, interpolated.";
+        pred.warning_message = ss.str();
+    }
+
+    if (raman_ref && raman_ref->has_measurement) {
+        auto val = validateAgainstRaman(pred, *raman_ref);
+        if (!val.within_tolerance) {
+            pred.warning_message = pred.warning_message.empty() ?
+                val.details : pred.warning_message + "; " + val.details;
+        }
+    }
 
     InkComposition comp;
     comp.timestamp = now_s();
@@ -68,6 +91,10 @@ InkComposition PlsrInversion::analyzeSlip(
     comp.impurity_ratio = pred.impurity_ratio;
     comp.confidence = pred.confidence;
     comp.ink_type = classifyInkType(pred.carbon_black_ratio, pred.binder_ratio);
+
+    if (details) {
+        *details = pred;
+    }
     return comp;
 }
 
@@ -283,6 +310,119 @@ bool PlsrInversion::generateDefaultCoefficients() {
 bool PlsrInversion::saveCoefficientsToJson(const std::string& path) const {
     (void)path;
     return true;
+}
+
+std::vector<float> PlsrInversion::extractSpectrumVectorWithInterpolation(
+    const std::vector<SpectralData>& spectral_data,
+    const std::vector<uint16_t>& wavelengths,
+    uint32_t* interpolated_count) const {
+
+    std::vector<uint16_t> wl = wavelengths;
+    if (wl.empty()) {
+        wl = {380, 400, 450, 500, 550, 600, 650, 700, 750, 780};
+    }
+
+    std::vector<uint16_t> known_wls;
+    std::vector<float> known_vals;
+    for (auto& d : spectral_data) {
+        known_wls.push_back(d.wavelength);
+        known_vals.push_back(d.reflectance);
+    }
+
+    std::vector<std::pair<uint16_t, float>> sorted_pairs;
+    for (size_t i = 0; i < known_wls.size(); ++i) {
+        sorted_pairs.push_back({known_wls[i], known_vals[i]});
+    }
+    std::sort(sorted_pairs.begin(), sorted_pairs.end());
+    std::vector<uint16_t> swl;
+    std::vector<float> sv;
+    for (auto& p : sorted_pairs) { swl.push_back(p.first); sv.push_back(p.second); }
+
+    uint32_t interp_n = 0;
+    std::vector<float> spectrum;
+    spectrum.reserve(wl.size());
+
+    for (auto target_wl : wl) {
+        bool found = false;
+        for (size_t i = 0; i < swl.size(); ++i) {
+            if (swl[i] == target_wl) {
+                spectrum.push_back(sv[i]);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            float interp_val = linearInterpolate(target_wl, swl, sv);
+            spectrum.push_back(interp_val);
+            interp_n++;
+        }
+    }
+
+    if (interpolated_count) *interpolated_count = interp_n;
+    return spectrum;
+}
+
+float PlsrInversion::linearInterpolate(
+    uint16_t target_wl,
+    const std::vector<uint16_t>& known_wls,
+    const std::vector<float>& known_vals) const {
+
+    if (known_wls.empty()) return 0.5f;
+    if (known_wls.size() == 1) return known_vals[0];
+
+    if (target_wl <= known_wls.front()) return known_vals.front();
+    if (target_wl >= known_wls.back()) return known_vals.back();
+
+    for (size_t i = 0; i + 1 < known_wls.size(); ++i) {
+        if (known_wls[i] <= target_wl && target_wl <= known_wls[i + 1]) {
+            float denom = static_cast<float>(known_wls[i + 1] - known_wls[i]);
+            if (denom < 1e-6f) return known_vals[i];
+            float t = static_cast<float>(target_wl - known_wls[i]) / denom;
+            return known_vals[i] + t * (known_vals[i + 1] - known_vals[i]);
+        }
+    }
+    return known_vals.back();
+}
+
+bool PlsrInversion::isSpectrumOutOfRange(const std::vector<float>& spectrum) const {
+    if (!loaded_ || coeffs_.X_mean.empty()) return false;
+    for (size_t i = 0; i < spectrum.size() && i < coeffs_.X_mean.size(); ++i) {
+        float z = std::abs((spectrum[i] - coeffs_.X_mean[i]) /
+                 (coeffs_.X_std[i] > 1e-6f ? coeffs_.X_std[i] : 1.0f));
+        if (z > 3.0f) return true;
+    }
+    return false;
+}
+
+ValidationResult PlsrInversion::validateAgainstRaman(
+    const PlsrPrediction& pred,
+    const RamanReference& raman,
+    float tolerance_pct) const {
+
+    ValidationResult r;
+    r.within_tolerance = true;
+    std::stringstream ss;
+
+    r.carbon_error_pct = raman.carbon_black_raman > 1e-6f ?
+        std::abs(pred.carbon_black_ratio - raman.carbon_black_raman) / raman.carbon_black_raman * 100.0f :
+        (pred.carbon_black_ratio > tolerance_pct / 100.0f ? 999.0f : 0.0f);
+    r.binder_error_pct = raman.binder_raman > 1e-6f ?
+        std::abs(pred.binder_ratio - raman.binder_raman) / raman.binder_raman * 100.0f : 0.0f;
+    r.moisture_error_pct = raman.moisture_raman > 1e-6f ?
+        std::abs(pred.moisture_ratio - raman.moisture_raman) / raman.moisture_raman * 100.0f : 0.0f;
+    r.impurity_error_pct = raman.impurity_raman > 1e-6f ?
+        std::abs(pred.impurity_ratio - raman.impurity_raman) / raman.impurity_raman * 100.0f : 0.0f;
+
+    if (r.carbon_error_pct > tolerance_pct) {
+        r.within_tolerance = false;
+        ss << "Carbon error " << r.carbon_error_pct << "% > " << tolerance_pct << "%. ";
+    }
+    if (r.binder_error_pct > tolerance_pct * 2) {
+        r.within_tolerance = false;
+        ss << "Binder error " << r.binder_error_pct << "% out of range. ";
+    }
+    r.details = ss.str();
+    return r;
 }
 
 }
