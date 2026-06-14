@@ -1,5 +1,11 @@
 #pragma once
 #include "common.h"
+#include <iostream>
+#include <cstdlib>
+
+#define TEST_CHECK_IMPL(cond, msg) do { if (!(cond)) { std::cerr << "  [FAIL] " << msg << " at " << __FILE__ << ":" << __LINE__ << std::endl; std::exit(1); } } while (0)
+#define CHECK(cond) TEST_CHECK_IMPL(cond, #cond)
+#define CHECK_MSG(cond, msg) TEST_CHECK_IMPL(cond, #cond ": " msg)
 
 namespace haihunhou {
 
