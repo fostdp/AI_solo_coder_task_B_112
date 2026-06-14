@@ -181,4 +181,84 @@ struct AlertBrokerConfig {
     bool enable_email = false;
 };
 
+struct SlipMatchResult {
+    uint32_t slip_a;
+    uint32_t slip_b;
+    float stroke_similarity;
+    float contour_similarity;
+    float composite_score;
+    uint8_t match_level;
+};
+
+struct InkComposition {
+    uint64_t timestamp;
+    uint32_t slip_id;
+    float carbon_black_ratio;
+    float binder_ratio;
+    float moisture_ratio;
+    float impurity_ratio;
+    float confidence;
+    std::string ink_type;
+};
+
+struct CorrosionPrediction {
+    uint64_t timestamp;
+    uint32_t slip_id;
+    float ochratoxin_concentration;
+    float citrinin_concentration;
+    float voctotal;
+    float corrosion_factor;
+    float predicted_damage_rate;
+    uint8_t risk_level;
+};
+
+struct EnvOptimizationResult {
+    uint64_t timestamp;
+    uint32_t zone_id;
+    float optimal_temperature;
+    float optimal_humidity;
+    float optimal_light_filter;
+    float predicted_lifespan_years;
+    float improvement_percent;
+    float current_temperature;
+    float current_humidity;
+};
+
+struct CnnMatcherConfig {
+    bool enabled = true;
+    std::string model_path = "models/siamese_stroke.pt";
+    float match_threshold = 0.75f;
+    uint32_t max_candidates = 10;
+    float stroke_weight = 0.6f;
+    float contour_weight = 0.4f;
+};
+
+struct PlsrInversionConfig {
+    bool enabled = true;
+    std::string coefficients_path = "models/plsr_coefficients.json";
+    uint32_t n_components = 15;
+    float confidence_threshold = 0.85f;
+};
+
+struct RfCorrosionConfig {
+    bool enabled = true;
+    std::string model_path = "models/rf_corrosion.json";
+    uint32_t n_estimators = 200;
+    float min_corrosion_factor = 1.0f;
+    float max_corrosion_factor = 10.0f;
+};
+
+struct BayesOptConfig {
+    bool enabled = true;
+    uint32_t max_iterations = 100;
+    float acquisition_kappa = 2.576f;
+    float temperature_min = 15.0f;
+    float temperature_max = 30.0f;
+    float humidity_min = 40.0f;
+    float humidity_max = 70.0f;
+    float light_filter_min = 0.0f;
+    float light_filter_max = 1.0f;
+    uint32_t opt_interval_sec = 3600;
+};
+
 }
