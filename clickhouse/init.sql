@@ -191,4 +191,88 @@ ALTER TABLE spectral_data ADD INDEX idx_timestamp timestamp TYPE minmax GRANULAR
 ALTER TABLE microbial_data ADD INDEX idx_timestamp timestamp TYPE minmax GRANULARITY 1;
 ALTER TABLE alerts ADD INDEX idx_status status TYPE set(10) GRANULARITY 1;
 
+-- =====================================================
+-- 11. 简牍缀合匹配结果表
+-- =====================================================
+DROP TABLE IF EXISTS slip_matches;
+CREATE TABLE slip_matches (
+    timestamp DateTime DEFAULT now(),
+    slip_a UInt32 COMMENT '简牍A ID',
+    slip_b UInt32 COMMENT '简牍B ID',
+    stroke_similarity Float32 COMMENT '笔锋特征相似度 0-1',
+    contour_similarity Float32 COMMENT '边缘轮廓相似度 0-1',
+    composite_score Float32 COMMENT '综合匹配度 0-1',
+    match_level UInt8 COMMENT '匹配等级:0无,1弱,2中,3强,4极强'
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+PRIMARY KEY (slip_a, slip_b)
+ORDER BY (slip_a, slip_b, timestamp)
+TTL timestamp + INTERVAL 5 YEAR;
+
+-- =====================================================
+-- 12. 墨料成分反演结果表
+-- =====================================================
+DROP TABLE IF EXISTS ink_composition;
+CREATE TABLE ink_composition (
+    timestamp DateTime DEFAULT now(),
+    slip_id UInt32,
+    carbon_black_ratio Float32 COMMENT '炭黑比例 0-1',
+    binder_ratio Float32 COMMENT '胶料比例 0-1',
+    moisture_ratio Float32 COMMENT '水分比例 0-1',
+    impurity_ratio Float32 COMMENT '杂质比例 0-1',
+    confidence Float32 COMMENT '预测置信度 0-1',
+    ink_type String COMMENT '墨料类型:松烟墨/油烟墨/漆烟墨/混合型墨'
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+PRIMARY KEY (slip_id, timestamp)
+ORDER BY (slip_id, timestamp)
+TTL timestamp + INTERVAL 10 YEAR;
+
+-- =====================================================
+-- 13. 霉菌腐蚀预测结果表
+-- =====================================================
+DROP TABLE IF EXISTS corrosion_prediction;
+CREATE TABLE corrosion_prediction (
+    timestamp DateTime DEFAULT now(),
+    slip_id UInt32,
+    ochratoxin_concentration Float32 COMMENT '赭曲霉毒素A浓度 ppb',
+    citrinin_concentration Float32 COMMENT '桔霉素浓度 ppb',
+    voc_total Float32 COMMENT '总挥发性有机物 ppm',
+    corrosion_factor Float32 COMMENT '腐蚀加剧因子 1-10',
+    predicted_damage_rate Float32 COMMENT '预测损伤速率 %/month',
+    risk_level UInt8 COMMENT '风险等级:1低,2中,3高,4极高'
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+PRIMARY KEY (slip_id, timestamp)
+ORDER BY (slip_id, timestamp)
+TTL timestamp + INTERVAL 10 YEAR;
+
+-- =====================================================
+-- 14. 微环境优化结果表
+-- =====================================================
+DROP TABLE IF EXISTS env_optimization;
+CREATE TABLE env_optimization (
+    timestamp DateTime DEFAULT now(),
+    zone_id UInt32 COMMENT '区域ID',
+    optimal_temperature Float32 COMMENT '最优温度 °C',
+    optimal_humidity Float32 COMMENT '最优湿度 %RH',
+    optimal_light_filter Float32 COMMENT '最优紫外过滤率 0-1',
+    predicted_lifespan_years Float32 COMMENT '预测保存寿命 年',
+    improvement_percent Float32 COMMENT '寿命提升百分比 %',
+    current_temperature Float32 COMMENT '当前温度 °C',
+    current_humidity Float32 COMMENT '当前湿度 %RH'
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(timestamp)
+PRIMARY KEY (zone_id, timestamp)
+ORDER BY (zone_id, timestamp)
+TTL timestamp + INTERVAL 5 YEAR;
+
+-- =====================================================
+-- 15. 新表索引优化
+-- =====================================================
+ALTER TABLE slip_matches ADD INDEX idx_score composite_score TYPE minmax GRANULARITY 1;
+ALTER TABLE ink_composition ADD INDEX idx_confidence confidence TYPE minmax GRANULARITY 1;
+ALTER TABLE corrosion_prediction ADD INDEX idx_risk risk_level TYPE set(10) GRANULARITY 1;
+ALTER TABLE env_optimization ADD INDEX idx_lifespan predicted_lifespan_years TYPE minmax GRANULARITY 1;
+
 SHOW TABLES;
