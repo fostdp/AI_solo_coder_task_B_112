@@ -1,0 +1,113 @@
+Start testing: Jun 14 16:46 中国标准时间
+----------------------------------------------------------
+1/4 Testing: test_fading_predictor
+1/4 Test: test_fading_predictor
+Command: "D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest/test_fading_predictor.exe"
+Directory: D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest
+"test_fading_predictor" start time: Jun 14 16:46 中国标准时间
+Output:
+----------------------------------------------------------
+=== FadingPredictor Test ===
+[PASS] calculateK1: 3.13297e-07
+[PASS] calculateK2: 2.08409e-07
+[PASS] calculateReflectance: 0.754419 (should be < 0.8)
+[PASS] Long-term fading: 0.562626 < 0.754419
+[PASS] High temp accelerates fading: 0.742201 < 0.754419
+[PASS] High humidity accelerates fading: 0.562553 < 0.562626
+[PASS] analyzeSlip: R=0.755 rate=18.75%/mo
+[PASS] analyzeSlip with empty history
+[INFO] fitModel: converged=YES iterations=3 residual=2.32532
+
+=== All FadingPredictor tests passed ===
+<end of output>
+Test time =   0.07 sec
+----------------------------------------------------------
+Test Passed.
+"test_fading_predictor" end time: Jun 14 16:46 中国标准时间
+"test_fading_predictor" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/4 Testing: test_mold_engine
+2/4 Test: test_mold_engine
+Command: "D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest/test_mold_engine.exe"
+Directory: D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest
+"test_mold_engine" start time: Jun 14 16:46 中国标准时间
+Output:
+----------------------------------------------------------
+=== MoldEngine Test ===
+[PASS] responseSurface: QING=17.8993 HUANG=62.6252
+[PASS] Cedar more resistant: CEDAR=7.29044 < UNKNOWN=29.8146
+[PASS] Gaussian growth: optimal=0.05 cold=0.00219685 dry=0.00328643
+[PASS] calculateGrowthRate: 0.0307396
+[PASS] predictSlip: current=38 1d=125.25 7d=125.25
+[PASS] Predictions increase over time
+[PASS] predictSlip with empty history
+
+=== All MoldEngine tests passed ===
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"test_mold_engine" end time: Jun 14 16:46 中国标准时间
+"test_mold_engine" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/4 Testing: test_config_loader
+3/4 Test: test_config_loader
+Command: "D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest/test_config_loader.exe"
+Directory: D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest
+"test_config_loader" start time: Jun 14 16:46 中国标准时间
+Output:
+----------------------------------------------------------
+=== ConfigLoader Test ===
+[PASS] clickhouse.host
+[PASS] clickhouse.port
+[PASS] clickhouse.database
+[PASS] http_server.port
+[PASS] opcua.simulation_mode
+[PASS] opcua.polling_interval_sec
+[PASS] alert.fading_threshold
+[PASS] alert.mold_threshold
+[PASS] fading_model.A1
+[PASS] fading_model.Ea1
+[PASS] fading_model.alpha
+[PASS] mold_model.beta0
+[PASS] mold_model.beta1
+[PASS] getFloat()
+[PASS] getInt()
+[PASS] getString()
+
+=== All ConfigLoader tests passed ===
+<end of output>
+Test time =   0.20 sec
+----------------------------------------------------------
+Test Passed.
+"test_config_loader" end time: Jun 14 16:46 中国标准时间
+"test_config_loader" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/4 Testing: test_message_bus
+4/4 Test: test_message_bus
+Command: "D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest/test_message_bus.exe"
+Directory: D:/SOLO-2/AI_solo_coder_task_A_112/build-ctest
+"test_message_bus" start time: Jun 14 16:46 中国标准时间
+Output:
+----------------------------------------------------------
+=== MessageBus Test ===
+[PASS] publishIngest
+[PASS] consumeIngest
+[PASS] IngestMessage content verification
+[PASS] publishAnalysis
+[PASS] consumeAnalysis
+[PASS] AnalysisMessage content verification
+
+=== All MessageBus tests passed ===
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"test_message_bus" end time: Jun 14 16:46 中国标准时间
+"test_message_bus" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Jun 14 16:46 中国标准时间
