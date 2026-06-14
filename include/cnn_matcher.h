@@ -1,5 +1,6 @@
 #pragma once
 #include "common.h"
+#include "thread_pool.h"
 #include <string>
 #include <vector>
 #include <thread>
@@ -8,6 +9,7 @@
 #include <unordered_map>
 #include <future>
 #include <functional>
+#include <memory>
 
 namespace haihunhou {
 
