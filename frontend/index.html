@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>海昏侯简牍监测系统 - 墨迹褪色与微生物防治</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <header class="header">
+            <div class="header-left">
+                <h1 class="title">海昏侯简牍监测系统</h1>
+                <span class="subtitle">墨迹褪色与微生物防治</span>
+            </div>
+            <div class="header-right">
+                <div class="status-indicator" id="connectionStatus">
+                    <span class="status-dot"></span>
+                    <span class="status-text">连接中...</span>
+                </div>
+                <div class="current-time" id="currentTime"></div>
+            </div>
+        </header>
+
+        <div class="main-content">
+            <aside class="sidebar">
+                <div class="stats-panel">
+                    <h3>实时统计</h3>
+                    <div class="stat-item">
+                        <span class="stat-label">简牍总数</span>
+                        <span class="stat-value" id="statTotalSlips">5000</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">在线设备</span>
+                        <span class="stat-value" id="statOnlineDevices">50</span>
+                    </div>
+                    <div class="stat-item critical">
+                        <span class="stat-label">严重告警</span>
+                        <span class="stat-value" id="statCritical">0</span>
+                    </div>
+                    <div class="stat-item warning">
+                        <span class="stat-label">警告</span>
+                        <span class="stat-value" id="statWarning">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">平均褪色速率</span>
+                        <span class="stat-value" id="statFadingRate">0.00%/月</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">平均霉菌浓度</span>
+                        <span class="stat-value" id="statMoldConc">0.0 CFU/cm²</span>
+                    </div>
+                </div>
+
+                <div class="control-panel">
+                    <h3>显示控制</h3>
+                    <div class="control-item">
+                        <label>
+                            <input type="checkbox" id="showFading" checked>
+                            显示褪色程度
+                        </label>
+                    </div>
+                    <div class="control-item">
+                        <label>
+                            <input type="checkbox" id="showMold" checked>
+                            显示霉斑粒子
+                        </label>
+                    </div>
+                    <div class="control-item">
+                        <label>
+                            <input type="checkbox" id="showLabels">
+                            显示简牍编号
+                        </label>
+                    </div>
+                    <div class="control-item">
+                        <label>显示模式</label>
+                        <select id="displayMode">
+                            <option value="fading">褪色风险</option>
+                            <option value="mold">霉菌风险</option>
+                            <option value="composite">综合风险</option>
+                        </select>
+                    </div>
+                    <div class="control-item">
+                        <label>
+                            <input type="checkbox" id="autoRotate">
+                            自动旋转
+                        </label>
+                    </div>
+                    <button class="btn-refresh" id="btnRefresh">刷新数据</button>
+                </div>
+
+                <div class="legend-panel">
+                    <h3>风险图例</h3>
+                    <div class="legend-item">
+                        <span class="legend-color" style="background: #28a745;"></span>
+                        <span>低风险 (1级)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color" style="background: #ffc107;"></span>
+                        <span>中风险 (2级)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color" style="background: #fd7e14;"></span>
+                        <span>高风险 (3级)</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color" style="background: #dc3545;"></span>
+                        <span>极高风险 (4级)</span>
+                    </div>
+                </div>
+            </aside>
+
+            <main class="content">
+                <div class="view-container">
+                    <div class="view-tabs">
+                        <button class="tab-btn active" data-tab="3d">三维视图</button>
+                        <button class="tab-btn" data-tab="heatmap">热力图</button>
+                        <button class="tab-btn" data-tab="trend">趋势分析</button>
+                    </div>
+
+                    <div class="tab-content active" id="tab-3d">
+                        <div class="canvas-container" id="canvasContainer">
+                            <canvas id="threeCanvas"></canvas>
+                            <div class="loading-overlay" id="loadingOverlay">
+                                <div class="spinner"></div>
+                                <p>加载5000枚简牍模型中...</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="tab-content" id="tab-heatmap">
+                        <div class="heatmap-container">
+                            <canvas id="heatmapCanvas"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="tab-content" id="tab-trend">
+                        <div class="trend-container">
+                            <div class="trend-chart">
+                                <h4>简牍#<span id="trendSlipId">1</span> 墨迹反射率趋势</h4>
+                                <canvas id="reflectanceChart"></canvas>
+                            </div>
+                            <div class="trend-chart">
+                                <h4>褪色速率预测</h4>
+                                <canvas id="fadingPredictionChart"></canvas>
+                            </div>
+                            <div class="trend-chart">
+                                <h4>霉菌浓度趋势</h4>
+                                <canvas id="moldChart"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="slip-detail-panel" id="slipDetailPanel">
+                    <div class="detail-header">
+                        <h3>简牍详情</h3>
+                        <button class="btn-close" id="btnCloseDetail">×</button>
+                    </div>
+                    <div class="detail-content" id="detailContent">
+                        <p>请点击简牍查看详情</p>
+                    </div>
+                </div>
+            </main>
+
+            <aside class="alerts-panel">
+                <div class="alerts-header">
+                    <h3>告警列表</h3>
+                    <span class="alerts-count" id="alertsCount">0</span>
+                </div>
+                <div class="alerts-list" id="alertsList">
+                    <div class="no-alerts">暂无告警</div>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/controls/OrbitControls.js"></script>
+    <script src="js/colormap.js"></script>
+    <script src="js/SlipModel.js"></script>
+    <script src="js/MoldParticles.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/websocket.js"></script>
+    <script src="js/scene3d.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
