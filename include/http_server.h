@@ -4,6 +4,10 @@
 #include "alert_engine.h"
 #include "fading_model.h"
 #include "mold_model.h"
+#include "cnn_matcher.h"
+#include "plsr_inversion.h"
+#include "rf_corrosion.h"
+#include "bayes_opt.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -30,6 +34,10 @@ class HttpServer {
 public:
     HttpServer(ClickHouseClient& db, AlertEngine& alert_engine,
                FadingModel& fading_model, MoldModel& mold_model,
+               CnnMatcher* cnn_matcher = nullptr,
+               PlsrInversion* plsr = nullptr,
+               RfCorrosion* rf_corrosion = nullptr,
+               BayesOpt* bayes_opt = nullptr,
                uint16_t port = 8080, const std::string& doc_root = "frontend");
     ~HttpServer();
 
@@ -45,6 +53,10 @@ private:
     AlertEngine& alert_engine_;
     FadingModel& fading_model_;
     MoldModel& mold_model_;
+    CnnMatcher* cnn_matcher_;
+    PlsrInversion* plsr_;
+    RfCorrosion* rf_corrosion_;
+    BayesOpt* bayes_opt_;
     uint16_t port_;
     std::string doc_root_;
     std::atomic<bool> running_;
@@ -92,6 +104,24 @@ private:
     void apiGetSlipsStatus(std::string& response);
     void apiPostIngestSpectral(const std::string& body, std::string& response);
     void apiPostIngestMicrobial(const std::string& body, std::string& response);
+
+    void apiPostMatchSlips(const std::string& body, std::string& response);
+    void apiGetSlipMatches(uint32_t slip_id,
+                           const std::unordered_map<std::string, std::string>& params,
+                           std::string& response);
+    void apiPostInkComposition(const std::string& body, std::string& response);
+    void apiGetSlipInkComposition(uint32_t slip_id,
+                                  const std::unordered_map<std::string, std::string>& params,
+                                  std::string& response);
+    void apiPostCorrosionPrediction(const std::string& body, std::string& response);
+    void apiGetSlipCorrosion(uint32_t slip_id,
+                             const std::unordered_map<std::string, std::string>& params,
+                             std::string& response);
+    void apiPostEnvOptimize(const std::string& body, std::string& response);
+    void apiGetEnvOptimizeStatus(uint32_t zone_id,
+                                  const std::unordered_map<std::string, std::string>& params,
+                                  std::string& response);
+    void apiGetFeatureImportance(std::string& response);
 
     bool serveStaticFile(const std::string& path,
                          http::response<http::string_body>& res);
