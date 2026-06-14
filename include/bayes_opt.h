@@ -108,6 +108,8 @@ public:
         float tol = 1e-3f,
         uint32_t window = 5) const;
 
+    float computeBoundaryPenalty(const EnvParameters& p) const;
+
 private:
     BayesOptConfig config_;
     GaussianParams gp_params_;
