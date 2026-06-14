@@ -16,18 +16,36 @@ struct StrokeFeatures {
     std::vector<float> speed_profile;
 };
 
-struct ContourFeatures {
-    std::vector<std::pair<float, float>> edge_points;
-    float perimeter;
-    float aspect_ratio;
-    float curvature_variance;
-};
-
 struct EmbeddingVector {
     std::vector<float> data;
     size_t size() const { return data.size(); }
     float& operator[](size_t i) { return data[i]; }
     const float& operator[](size_t i) const { return data[i]; }
+};
+
+enum MatcherError {
+    MATCHER_OK = 0,
+    MATCHER_ERR_EMPTY_IMAGE = 1,
+    MATCHER_ERR_INSUFFICIENT_POINTS = 2,
+    MATCHER_ERR_DIM_MISMATCH = 3,
+    MATCHER_ERR_MODEL_NOT_LOADED = 4,
+    MATCHER_ERR_NO_CANDIDATES = 5
+};
+
+struct MatchStatus {
+    MatcherError code = MATCHER_OK;
+    std::string message;
+    float edge_damage_ratio_a = 0.0f;
+    float edge_damage_ratio_b = 0.0f;
+    bool has_warning = false;
+};
+
+struct ContourFeatures {
+    std::vector<std::pair<float, float>> edge_points;
+    float perimeter;
+    float aspect_ratio;
+    float curvature_variance;
+    float edge_completeness = 1.0f;
 };
 
 class CnnMatcher {
@@ -45,7 +63,8 @@ public:
         uint32_t query_slip_id,
         const std::vector<uint32_t>& candidate_ids,
         const std::vector<SpectralData>& query_spectral,
-        const std::unordered_map<uint32_t, std::vector<SpectralData>>& candidate_spectral);
+        const std::unordered_map<uint32_t, std::vector<SpectralData>>& candidate_spectral,
+        MatchStatus* status = nullptr);
 
     std::vector<SlipMatchResult> matchAllSlips(
         const std::vector<uint32_t>& slip_ids,
@@ -61,6 +80,17 @@ public:
         const ContourFeatures& b) const;
 
     float cosineSimilarity(const EmbeddingVector& a, const EmbeddingVector& b) const;
+
+    float estimateEdgeDamageRatio(const ContourFeatures& f) const;
+
+    float applyDamagePenalty(float base_similarity, float damage_a, float damage_b) const;
+
+    MatcherError validateMatchInput(
+        const std::vector<SpectralData>& query,
+        const std::vector<uint32_t>& candidates,
+        const std::unordered_map<uint32_t, std::vector<SpectralData>>& candidate_spectral) const;
+
+    bool isImageMissing(const std::vector<SpectralData>& spectral) const;
 
 private:
     CnnMatcherConfig config_;
