@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: haihunhou-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      - CLICKHOUSE_DB=haihunhou
+      - CLICKHOUSE_USER=default
+      - CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1
+    volumes:
+      - ./clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./clickhouse/seed_data.sql:/docker-entrypoint-initdb.d/seed_data.sql:ro
+      - clickhouse_data:/var/lib/clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.backend
+    container_name: haihunhou-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - CLICKHOUSE_HOST=clickhouse
+      - CLICKHOUSE_PORT=8123
+      - CLICKHOUSE_DB=haihunhou
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    volumes:
+      - ./frontend:/app/frontend:ro
+      - ./config:/app/config:ro
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  simulator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.simulator
+    container_name: haihunhou-simulator
+    environment:
+      - SERVER_URL=http://backend:8080
+      - REPORT_INTERVAL=21600
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  clickhouse_data:
+
+networks:
+  default:
+    name: haihunhou-network
