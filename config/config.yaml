@@ -86,6 +86,71 @@ algorithm:
     beta4: -0.0008
     beta5: 0.001
 
+# 简牍缀合智能推荐配置
+cnn_matcher:
+  # 模型文件路径 (libtorch .pt 格式)
+  model_path: "models/siamese_stroke.pt"
+  # 匹配阈值 0-1
+  match_threshold: 0.7
+  # 最大候选数量
+  max_candidates: 10
+  # 笔锋特征权重
+  stroke_weight: 0.6
+  # 轮廓特征权重
+  contour_weight: 0.4
+  # 嵌入向量维度
+  embedding_dim: 128
+
+# 古代墨料成分反演配置
+plsr_inversion:
+  # 模型系数文件路径 (JSON)
+  coefficients_path: "models/plsr_ink_coefficients.json"
+  # PLS潜变量数量
+  n_components: 15
+  # 置信度阈值
+  confidence_threshold: 0.85
+  # 波长列表 (nm)
+  wavelengths: [380, 400, 450, 500, 550, 600, 650, 700, 750, 780]
+
+# 霉菌腐蚀预测配置
+rf_corrosion:
+  # 随机森林模型文件路径 (JSON)
+  model_path: "models/rf_corrosion_model.json"
+  # 决策树数量
+  n_estimators: 200
+  # 最小腐蚀加剧因子
+  min_corrosion_factor: 1.0
+  # 最大腐蚀加剧因子
+  max_corrosion_factor: 10.0
+  # 风险等级阈值 (4级:低/中/高/极高)
+  risk_thresholds: [1.5, 3.0, 6.0]
+
+# 微环境贝叶斯优化配置
+bayes_opt:
+  # 最大迭代次数
+  max_iterations: 100
+  # 初始采样点数
+  initial_samples: 5
+  # 温度范围 (°C)
+  temperature_min: 15.0
+  temperature_max: 30.0
+  # 湿度范围 (%RH)
+  humidity_min: 40.0
+  humidity_max: 70.0
+  # 紫外过滤率范围 (0-1)
+  light_filter_min: 0.0
+  light_filter_max: 1.0
+  # 高斯过程核长度尺度
+  gp_length_scale: 1.0
+  # 高斯过程信号方差
+  gp_signal_variance: 1.0
+  # 高斯过程噪声方差
+  gp_noise_variance: 0.01
+  # 采集函数: ei/ucb/pi
+  acquisition_function: "ei"
+  # UCB探索系数
+  ucb_kappa: 2.576
+
 # 日志配置
 logging:
   level: info
