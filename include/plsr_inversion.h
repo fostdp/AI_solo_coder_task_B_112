@@ -29,6 +29,27 @@ struct PlsrPrediction {
     std::vector<float> residuals;
     float hotelling_t2;
     float q_residual;
+    bool out_of_range_warning = false;
+    bool missing_band_warning = false;
+    std::string warning_message;
+    uint32_t interpolated_bands = 0;
+};
+
+struct RamanReference {
+    float carbon_black_raman = 0.0f;
+    float binder_raman = 0.0f;
+    float moisture_raman = 0.0f;
+    float impurity_raman = 0.0f;
+    bool has_measurement = false;
+};
+
+struct ValidationResult {
+    float carbon_error_pct;
+    float binder_error_pct;
+    float moisture_error_pct;
+    float impurity_error_pct;
+    bool within_tolerance;
+    std::string details;
 };
 
 class PlsrInversion {
@@ -45,7 +66,9 @@ public:
 
     InkComposition analyzeSlip(
         uint32_t slip_id,
-        const std::vector<SpectralData>& spectral_curve);
+        const std::vector<SpectralData>& spectral_curve,
+        PlsrPrediction* details = nullptr,
+        const RamanReference* raman_ref = nullptr);
 
     PlsrPrediction predict(const std::vector<float>& spectrum);
 
@@ -53,11 +76,28 @@ public:
         const std::vector<SpectralData>& spectral_data,
         const std::vector<uint16_t>& wavelengths = {}) const;
 
+    std::vector<float> extractSpectrumVectorWithInterpolation(
+        const std::vector<SpectralData>& spectral_data,
+        const std::vector<uint16_t>& wavelengths,
+        uint32_t* interpolated_count = nullptr) const;
+
     float calculateConfidence(
         const PlsrPrediction& pred,
         const std::vector<float>& input) const;
 
     std::string classifyInkType(float carbon_black, float binder) const;
+
+    bool isSpectrumOutOfRange(const std::vector<float>& spectrum) const;
+
+    float linearInterpolate(
+        uint16_t target_wl,
+        const std::vector<uint16_t>& known_wls,
+        const std::vector<float>& known_vals) const;
+
+    ValidationResult validateAgainstRaman(
+        const PlsrPrediction& pred,
+        const RamanReference& raman,
+        float tolerance_pct = 5.0f) const;
 
 private:
     PlsrInversionConfig config_;
