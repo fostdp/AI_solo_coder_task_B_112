@@ -231,6 +231,8 @@ struct CnnMatcherConfig {
     uint32_t max_candidates = 10;
     float stroke_weight = 0.6f;
     float contour_weight = 0.4f;
+    uint32_t num_threads = 2;
+    bool use_async_inference = true;
 };
 
 struct PlsrInversionConfig {
@@ -238,6 +240,9 @@ struct PlsrInversionConfig {
     std::string coefficients_path = "models/plsr_coefficients.json";
     uint32_t n_components = 15;
     float confidence_threshold = 0.85f;
+    bool enable_smoothing = true;
+    uint32_t smooth_window_size = 5;
+    uint32_t smooth_poly_order = 2;
 };
 
 struct RfCorrosionConfig {
@@ -259,6 +264,8 @@ struct BayesOptConfig {
     float light_filter_min = 0.0f;
     float light_filter_max = 1.0f;
     uint32_t opt_interval_sec = 3600;
+    float boundary_penalty_strength = 0.6f;
+    float boundary_penalty_scale = 0.15f;
 };
 
 }
